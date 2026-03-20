@@ -247,6 +247,8 @@ void* RRcpu(void* param) {
     int threadNum = ((CpuParams*) param)->threadNumber;
     SharedVars* svars = ((CpuParams*) param)->svars;
 
+    int quantCount = 0;
+
     // p is the process currently running on this CPU.
     // p == NULL means the CPU is idle and must pick a new process from readyQ.
     Process* p = NULL;
@@ -281,22 +283,28 @@ void* RRcpu(void* param) {
 
             pthread_mutex_unlock(&(svars->readyQLock));
         }
-
         // ── Execution: one unit of work ──────────────────────────────────
         // If we have a process (carried over from a prior tick or just
         // selected above), burn one unit of its remaining CPU burst.
         if (p != NULL) {
-            p->burstRemaining--;
 
-            if (p->burstRemaining == 0) {
-                // Process is done — move it to finishedQ so main can
-                // compute and print wait-time statistics at simulation end.
-                pthread_mutex_lock(&(svars->finishedQLock));
-                qInsert(&(svars->finishedQ), p);
-                pthread_mutex_unlock(&(svars->finishedQLock));
+            // Add to our quantum time counter so we can compare it with the value that
+            // is inside of the struct 
+            while (quantCount != svars->quantum){
+                quantCount++;
+                p->burstRemaining--;
+                printf("svars-quantum = %d\n", svars->quantum);
+                printf("my Quant Count = %d\n", quantCount);
+                if (p->burstRemaining == 0) {
+                    // Process is done — move it to finishedQ so main can
+                    // compute and print wait-time statistics at simulation end.
+                    pthread_mutex_lock(&(svars->finishedQLock));
+                    qInsert(&(svars->finishedQ), p);
+                    pthread_mutex_unlock(&(svars->finishedQLock));
 
-                // CPU is now idle; it will select a new process next tick.
-                p = NULL;
+                    // CPU is now idle; it will select a new process next tick.
+                    p = NULL;
+                }
             }
         }
 
@@ -339,9 +347,9 @@ void* SRTFcpu(void* param) {
             // Index 0 = head of the list = the process that has been waiting
             // the longest (qInsert always appends to the tail, so the head is
             // always the oldest arrival — that is the FIFO selection rule).
-            p = qRemove(&(svars->readyQ), qPriority(&(svars->readyQ)));
+            p = qRemove(&(svars->readyQ), 0);
 
-            if (p != NULL) {
+            if (p == NULL) {
                 // readyQ was empty — CPU stays idle this tick.
                 printf("No process to schedule\n");
             } else {
