@@ -1,7 +1,7 @@
 /** CPUs.c
  * ===========================================================
- * Name: <Last Name, First Name>
- * Section: <Section>
+ * Name: Wuest, Skyler
+ * Section: M3
  * Project: PEX2 - CPU Scheduling Simulator
  * Purpose: Implements six CPU scheduling algorithms as POSIX threads.
  *          Each thread follows the same pattern every timestep:
@@ -107,30 +107,31 @@ void* SJFcpu(void* param) {
     int threadNum = ((CpuParams*) param)->threadNumber;
     SharedVars* svars = ((CpuParams*) param)->svars;
 
-    Process* p = NULL;  // TODO: uncomment when you implement this function
+    // p is the process currently running on this CPU.
+    // p == NULL means the CPU is idle and must pick a new process from readyQ.
+    Process* p = NULL;
 
+    // This thread runs forever — one loop iteration = one simulation timestep.
     while (1) {
-        // —— Sync point 1: wait for main to start this timestep ——————
-        // main() posts cpuSems[threadNum] once per tick. We block here
+        // ── Sync point 1: wait for main to start this timestep ──────────
+        // main() posts cpuSems[threadNum] once per tick.  We block here
         // until that post arrives, keeping this CPU in lockstep with the clock.
         sem_wait(svars->cpuSems[threadNum]);
 
-        // —— Selection (only when idle) ———————————————————
-        // SJF is non-preemptive: once a process is running (p != NULL) we
-        // never replace it mid-burst. We only enter this block when the CPU
+        // ── Selection (only when idle) ───────────────────────────────────
+        // FIFO is non-preemptive: once a process is running (p != NULL) we
+        // never replace it mid-burst.  We only enter this block when the CPU
         // has nothing to run.
         if (p == NULL) {
             // Lock readyQ before inspecting or modifying it — another CPU
             // thread (or main inserting a new arrival) could touch it right now.
-        
             pthread_mutex_lock(&(svars->readyQLock));
 
             // Index 0 = head of the list = the process that has been waiting
             // the longest (qInsert always appends to the tail, so the head is
             // always the oldest arrival — that is the FIFO selection rule).
-        
-            p = qRemove(&(svars->readyQ),qShortest(&(svars->readyQ)));
-            
+            p = qRemove(&(svars->readyQ), qShortest(&(svars->readyQ)));
+
             if (p == NULL) {
                 // readyQ was empty — CPU stays idle this tick.
                 printf("No process to schedule\n");
@@ -141,7 +142,7 @@ void* SJFcpu(void* param) {
             pthread_mutex_unlock(&(svars->readyQLock));
         }
 
-        // —— Execution: one unit of work —————————————————
+        // ── Execution: one unit of work ──────────────────────────────────
         // If we have a process (carried over from a prior tick or just
         // selected above), burn one unit of its remaining CPU burst.
         if (p != NULL) {
@@ -157,9 +158,13 @@ void* SJFcpu(void* param) {
                 // CPU is now idle; it will select a new process next tick.
                 p = NULL;
             }
+        }
+
+        // ── Sync point 2: signal main that this CPU is done ─────────────
+        // main() waits on mainSem once per CPU per tick.  Posting here
+        // tells main this CPU has finished its work for the current timestep.
         sem_post(svars->mainSem);
     }
-}
 }
 
 // ============================================================
@@ -172,7 +177,7 @@ void* NPPcpu(void* param) {
     int threadNum = ((CpuParams*) param)->threadNumber;
     SharedVars* svars = ((CpuParams*) param)->svars;
 
-    Process* p = NULL;  // TODO: uncomment when you implement this function
+    Process* p = NULL; 
 
     while (1) {
         // —— Sync point 1: wait for main to start this timestep ——————
@@ -195,7 +200,7 @@ void* NPPcpu(void* param) {
             // always the oldest arrival — that is the FIFO selection rule).
         
             p = qRemove(&(svars->readyQ), qPriority(&(svars->readyQ)));
-            
+
             if (p == NULL) {
                 // readyQ was empty — CPU stays idle this tick.
                 printf("No process to schedule\n");
@@ -242,6 +247,8 @@ void* RRcpu(void* param) {
     while (1) {
         sem_wait(svars->cpuSems[threadNum]);
 
+
+        
         sem_post(svars->mainSem);
     }
 }
@@ -255,13 +262,58 @@ void* SRTFcpu(void* param) {
     int threadNum = ((CpuParams*) param)->threadNumber;
     SharedVars* svars = ((CpuParams*) param)->svars;
 
-    // Process* p = NULL;  // TODO: uncomment when you implement this function
-
+    Process* p = NULL; 
     while (1) {
+        // —— Sync point 1: wait for main to start this timestep ——————
+        // main() posts cpuSems[threadNum] once per tick. We block here
+        // until that post arrives, keeping this CPU in lockstep with the clock.
         sem_wait(svars->cpuSems[threadNum]);
 
+        // —— Selection (only when idle) ———————————————————
+        // SRTF is preemptive: once a process is running (p != NULL) we
+        // can replace it mid-burst.
+        if (p == NULL) {
+            // Lock readyQ before inspecting or modifying it — another CPU
+            // thread (or main inserting a new arrival) could touch it right now.
+        
+            //pthread_mutex_lock(&(svars->readyQLock));
+
+            // Index 0 = head of the list = the process that has been waiting
+            // the longest (qInsert always appends to the tail, so the head is
+            // always the oldest arrival — that is the FIFO selection rule).
+        
+            p = qRemove(&(svars->readyQ), qShortest(&(svars->readyQ)));
+            
+            if (p == NULL) {
+                // readyQ was empty — CPU stays idle this tick.
+                printf("No process to schedule\n");
+            } else {
+                printf("Scheduling PID %d\n", p->PID);
+                
+            }
+
+           // pthread_mutex_unlock(&(svars->readyQLock));
+        }
+
+        // —— Execution: one unit of work —————————————————
+        // If we have a process (carried over from a prior tick or just
+        // selected above), burn one unit of its remaining CPU burst.
+        if (p != NULL) {
+            p->burstRemaining--;
+            //printf("Burst Left %d\n", p->burstRemaining);
+            if (p->burstRemaining == 0) {
+                // Process is done — move it to finishedQ so main can
+                // compute and print wait-time statistics at simulation end.
+                pthread_mutex_lock(&(svars->finishedQLock));
+                qInsert(&(svars->finishedQ), p);
+                pthread_mutex_unlock(&(svars->finishedQLock));
+
+                // CPU is now idle; it will select a new process next tick.
+                p = NULL;
+            }
         sem_post(svars->mainSem);
     }
+}
 }
 
 // ============================================================
